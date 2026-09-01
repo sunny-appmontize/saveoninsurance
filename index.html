@@ -303,6 +303,34 @@
       .cta { animation: none; }
     }
   </style>
+  <!-- Meta Pixel Code -->
+  <script>
+    !(function (f, b, e, v, n, t, s) {
+      if (f.fbq) return;
+      n = f.fbq = function () {
+        n.callMethod
+          ? n.callMethod.apply(n, arguments)
+          : n.queue.push(arguments);
+      };
+      if (!f._fbq) f._fbq = n;
+      n.push = n;
+      n.loaded = !0;
+      n.version = "2.0";
+      n.queue = [];
+      t = b.createElement(e);
+      t.async = !0;
+      t.src = v;
+      s = b.getElementsByTagName(e)[0];
+      s.parentNode.insertBefore(t, s);
+    })(
+      window,
+      document,
+      "script",
+      "https://connect.facebook.net/en_US/fbevents.js",
+    );
+    // init fires below in body after params are read
+  </script>
+  <!-- End Meta Pixel Code -->
 </head>
 <body>
 
@@ -321,7 +349,7 @@
       <input type="text" inputmode="numeric" maxlength="5" placeholder="Your zip code" id="zipInput" />
     </div>
 
-    <a href="https://paychat.fuse-ad.com/tl?a=1651&amp;o=6460" class="cta" id="ctaTop">CHECK ELIGIBILITY ➤</a>
+    <a href="https://paychat.fuse-ad.com/tl?a=1651&amp;o=6460" class="cta dynamic_link" id="ctaTop">CHECK ELIGIBILITY ➤</a>
     <p class="trust-line">🔒 100% Free &amp; Secure. No SSN Required.</p>
   </section>
 
@@ -353,7 +381,7 @@
   <div class="section">
     <p class="loyalty-title">Don't Let Loyalty Cost You</p>
     <p class="loyalty-text">Staying with the same carrier for years often means missing out on new rate adjustments. It takes minutes to check the current market.</p>
-    <a href="https://paychat.fuse-ad.com/tl?a=1651&amp;o=6460" class="cta" style="margin-top:16px;">CHECK ELIGIBILITY ➤</a>
+    <a href="https://paychat.fuse-ad.com/tl?a=1651&amp;o=6460" class="cta dynamic_link" style="margin-top:16px;">CHECK ELIGIBILITY ➤</a>
   </div>
 
   <!-- FAQ -->
@@ -426,5 +454,171 @@
       zipInput.value = zipInput.value.replace(/\D/g, '').slice(0, 5);
     });
   </script>
+
+  <!-- ✅ CLEAN FUSECLICK MAPPING — uses native fields + tight sub slots -->
+  <script>
+    (function () {
+      // ── BLOCK LOCALHOST — no real events during dev testing ────────
+      var isLocal =
+        ["localhost", "127.0.0.1", ""].indexOf(window.location.hostname) !== -1;
+
+      // ── 0. HELPER — drop any unfired macro like "{fbclid}" ─────────
+      function val(x) {
+        return x && !/^\{.*\}$/.test(x) ? x : null;
+      }
+
+      // ── 1. READ ALL URL PARAMS ─────────────────────────────────────
+      var p = new URLSearchParams(window.location.search);
+      var realFbclid  = val(p.get("fbclid"));
+      var affClick    = val(p.get("aff_click_id"));
+      var utmSource   = val(p.get("utm_source"));
+      var utmCampaign = val(p.get("utm_campaign"));
+      var utmTerm     = val(p.get("utm_term"));
+      var utmContent  = val(p.get("utm_content"));
+      var adId        = val(p.get("ad_id"));
+      var adsetId     = val(p.get("adset_id"));
+      var cmpId       = val(p.get("cmp_id"));
+      var placement   = val(p.get("placement"));
+
+      // ── 2. RESOLVE FBCLID & SOURCE ─────────────────────────────────
+      var finalClickId = affClick || realFbclid || null;
+      // Source is ONLY set for real Facebook traffic. A clean/organic
+      // visit (no fbclid, no utm_source) sends NO source — no fake "fb".
+      var finalSc = utmSource || (finalClickId ? "fb" : null);
+
+      // ── 3. BUILD fbc = fb.1.{landTimestampMs}.{fbclid} ─────────────
+      var landTs  = Date.now();
+      var landSec = Math.floor(landTs / 1000);
+      var fbc     = finalClickId ? "fb.1." + landTs + "." + finalClickId : null;
+
+      // ── 4. READ fbp COOKIE ─────────────────────────────────────────
+      var fbpMatch = document.cookie.match(/(^|;\s*)_fbp=([^;]+)/);
+      var fbp      = fbpMatch ? fbpMatch[2] : null;
+
+      // ── 5. PIXEL INIT — after params so fbc is available ───────────
+      if (!isLocal && typeof fbq === "function") {
+        var initObj = {};
+        if (fbc) initObj.fbc = fbc;
+        if (fbp) initObj.fbp = fbp;
+
+        fbq("init", "2532262490501051", initObj);
+        fbq(
+          "track",
+          "PageView",
+          {},
+          {
+            eventID:
+              "pv_" +
+              landSec +
+              "_" +
+              (finalClickId
+                ? finalClickId.substring(0, 12)
+                : Math.random().toString(36).substring(2, 8)),
+          },
+        );
+      }
+
+      // ── 6. SESSION EVENT ID — stable per visit, used for dedup ─────
+      // Clean format: "btn_<fbclid20>_<ts>" with click, "btn_<ts>" without.
+      var sessionEid = sessionStorage.getItem("_soi_eid");
+      if (!sessionEid) {
+        sessionEid =
+          "btn_" +
+          (finalClickId ? finalClickId.substring(0, 20) + "_" : "") +
+          landTs;
+        sessionStorage.setItem("_soi_eid", sessionEid);
+      }
+
+      // ── 7. STORE FULL VISIT CONTEXT for morning CAPI upload ────────
+      sessionStorage.setItem(
+        "_soi_visit",
+        JSON.stringify({
+          event_id:     sessionEid,
+          fbc:          fbc,
+          fbp:          fbp,
+          fbclid:       finalClickId,
+          land_ts_ms:   landTs,
+          land_ts_sec:  landSec,
+          utm_campaign: utmCampaign,
+          utm_term:     utmTerm,
+          utm_content:  utmContent,
+          utm_source:   utmSource,
+          ad_id:        adId,
+          adset_id:     adsetId,
+          cmp_id:       cmpId,
+          placement:    placement,
+          sc:           finalSc,
+        }),
+      );
+
+      // ── 8. BUILD FINAL FUSECLICK URL ───────────────────────────────
+      var qs = new URLSearchParams();
+      qs.set("a", "1651");
+      qs.set("o", "6460");
+
+      function put(key, v) {
+        if (v !== null && v !== undefined && v !== "") qs.set(key, v);
+      }
+
+      // Native FuseClick fields
+      put("aff_click_id", finalClickId);
+      put("sub_affid",    placement);
+      put("sc",           finalSc);
+
+      // Human-readable names (s1–s3)
+      put("s1", utmCampaign);   // campaign NAME
+      put("s2", utmTerm);       // adset NAME
+      put("s3", utmContent);    // creative NAME
+
+      // CAPI reconciliation data (s4–s7)
+      put("s4", sessionEid);    // dedup id
+      put("s5", fbc);           // facebook click cookie
+      put("s6", fbp);           // facebook browser cookie
+      put("s7", landSec);       // land timestamp (unix sec)
+
+      // Machine-readable IDs (s8–s10) — stable, won't break on rename
+      put("s8",  adId);         // ad ID
+      put("s9",  adsetId);      // adset ID
+      put("s10", cmpId);        // campaign ID
+
+      var finalCTA = "https://paychat.fuse-ad.com/tl?" + qs.toString();
+
+      // ── 9. ATTACH TO ALL CTA LINKS ─────────────────────────────────
+      document.querySelectorAll(".dynamic_link").forEach(function (link) {
+        link.href = finalCTA;
+
+        link.addEventListener("click", function (e) {
+          // Stop the browser from navigating immediately —
+          // we need the pixel beacon to flush first.
+          e.preventDefault();
+
+          // Browser pixel Lead — eventID dedups against the CAPI upload
+          if (!isLocal && typeof fbq === "function") {
+            fbq(
+              "track",
+              "Lead",
+              { value: 0.0, currency: "USD", predicted_ltv: 0.0 },
+              { eventID: sessionEid },
+            );
+          }
+
+          // Give the pixel ~250ms to flush, THEN navigate
+          setTimeout(function () {
+            window.location.href = finalCTA;
+          }, 250);
+        });
+      });
+    })();
+  </script>
+
+  <!-- noscript pixel fallback — real domain only -->
+  <noscript>
+    <img
+      height="1"
+      width="1"
+      style="display: none"
+      src="https://www.facebook.com/tr?id=2532262490501051&ev=PageView&noscript=1"
+    />
+  </noscript>
 </body>
 </html>
