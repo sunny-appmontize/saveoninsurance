@@ -331,6 +331,49 @@
     // init fires below in body after params are read
   </script>
   <!-- End Meta Pixel Code -->
+  <!-- TikTok Pixel Code -->
+  <script>
+    !(function (w, d, t) {
+      w.TiktokAnalyticsObject = t;
+      var ttq = (w[t] = w[t] || []);
+      ttq.methods = ["page","track","identify","instances","debug","on","off",
+        "once","ready","alias","group","enableCookie","disableCookie",
+        "holdConsent","revokeConsent","grantConsent"];
+      ttq.setAndDefer = function (obj, method) {
+        obj[method] = function () {
+          obj.push([method].concat(Array.prototype.slice.call(arguments, 0)));
+        };
+      };
+      for (var i = 0; i < ttq.methods.length; i++)
+        ttq.setAndDefer(ttq, ttq.methods[i]);
+      ttq.instance = function (id) {
+        var inst = ttq._i[id] || [];
+        for (var n = 0; n < ttq.methods.length; n++)
+          ttq.setAndDefer(inst, ttq.methods[n]);
+        return inst;
+      };
+      ttq.load = function (id, opts) {
+        var url = "https://analytics.tiktok.com/i18n/pixel/events.js";
+        var opt = opts || {};
+        opt.partner = ttq._partner;
+        ttq._i = ttq._i || {};
+        ttq._i[id] = [];
+        ttq._i[id]._u = url;
+        ttq._t = ttq._t || {};
+        ttq._t[id] = +new Date();
+        ttq._o = ttq._o || {};
+        ttq._o[id] = opt;
+        var s = d.createElement("script");
+        s.type = "text/javascript";
+        s.async = !0;
+        s.src = url + "?sdkid=" + id + "&lib=" + t;
+        var f = d.getElementsByTagName("script")[0];
+        f.parentNode.insertBefore(s, f);
+      };
+      // load() + page() fire below in body, after params are read
+    })(window, document, "ttq");
+  </script>
+  <!-- End TikTok Pixel Code -->
 </head>
 <body>
 
@@ -469,8 +512,9 @@
 
       // ── 1. READ ALL URL PARAMS ─────────────────────────────────────
       var p = new URLSearchParams(window.location.search);
-      var realFbclid  = val(p.get("fbclid"));
-      var affClick    = val(p.get("aff_click_id"));
+      var realFbclid  = val(p.get("fbclid"));        // Meta click id
+      var realTtclid  = val(p.get("ttclid"));        // TikTok click id
+      var affClick    = val(p.get("aff_click_id"));  // pre-resolved by a tracker
       var utmSource   = val(p.get("utm_source"));
       var utmCampaign = val(p.get("utm_campaign"));
       var utmTerm     = val(p.get("utm_term"));
@@ -480,42 +524,67 @@
       var cmpId       = val(p.get("cmp_id"));
       var placement   = val(p.get("placement"));
 
-      // ── 2. RESOLVE FBCLID & SOURCE ─────────────────────────────────
-      var finalClickId = affClick || realFbclid || null;
-      // Source is ONLY set for real Facebook traffic. A clean/organic
-      // visit (no fbclid, no utm_source) sends NO source — no fake "fb".
-      var finalSc = utmSource || (finalClickId ? "fb" : null);
+      // ── 2. RESOLVE CHANNEL, CLICK ID & SOURCE ──────────────────────
+      // Which platform did this visitor actually arrive from? The click id
+      // in the URL is the only trustworthy signal — utm_source can be typed
+      // by anyone, so it is a fallback, never an override.
+      var channel =
+        realTtclid ? "tiktok" :
+        realFbclid ? "fb"     :
+        (utmSource === "tiktok" || utmSource === "tt") ? "tiktok" :
+        (utmSource === "fb" || utmSource === "facebook" || utmSource === "meta") ? "fb" :
+        null;   // organic / direct / unknown — fire nothing, claim nothing
 
-      // ── 3. BUILD fbc = fb.1.{landTimestampMs}.{fbclid} ─────────────
+      // aff_click_id wins when present (an upstream tracker already resolved it)
+      var finalClickId = affClick || realTtclid || realFbclid || null;
+
+      // Source reported to FuseClick. An organic visit sends NO source,
+      // so we never invent a channel we cannot prove.
+      var finalSc = utmSource || channel;
+
+      var isMeta   = channel === "fb";
+      var isTikTok = channel === "tiktok";
+
+      // ── 3. BUILD CHANNEL COOKIES / CLICK CONTEXT ───────────────────
       var landTs  = Date.now();
       var landSec = Math.floor(landTs / 1000);
-      var fbc     = finalClickId ? "fb.1." + landTs + "." + finalClickId : null;
 
-      // ── 4. READ fbp COOKIE ─────────────────────────────────────────
+      // Meta: fbc = fb.1.{landTimestampMs}.{fbclid}
+      var fbc = isMeta && finalClickId
+        ? "fb.1." + landTs + "." + finalClickId
+        : null;
+
+      // ── 4. READ PLATFORM COOKIES ───────────────────────────────────
       var fbpMatch = document.cookie.match(/(^|;\s*)_fbp=([^;]+)/);
       var fbp      = fbpMatch ? fbpMatch[2] : null;
 
-      // ── 5. PIXEL INIT — after params so fbc is available ───────────
-      if (!isLocal && typeof fbq === "function") {
+      // TikTok drops _ttp (its browser id, the ttclid/fbp equivalent)
+      var ttpMatch = document.cookie.match(/(^|;\s*)_ttp=([^;]+)/);
+      var ttp      = ttpMatch ? ttpMatch[2] : null;
+
+      // ── 5. PIXEL INIT — after params so click context is available ─
+      // Only the arriving channel's pixel fires. Firing both would report
+      // one visit as two, and would attribute TikTok traffic to Meta.
+      var pvEventId =
+        "pv_" +
+        landSec +
+        "_" +
+        (finalClickId
+          ? finalClickId.substring(0, 12)
+          : Math.random().toString(36).substring(2, 8));
+
+      if (!isLocal && isMeta && typeof fbq === "function") {
         var initObj = {};
         if (fbc) initObj.fbc = fbc;
         if (fbp) initObj.fbp = fbp;
 
         fbq("init", "2532262490501051", initObj);
-        fbq(
-          "track",
-          "PageView",
-          {},
-          {
-            eventID:
-              "pv_" +
-              landSec +
-              "_" +
-              (finalClickId
-                ? finalClickId.substring(0, 12)
-                : Math.random().toString(36).substring(2, 8)),
-          },
-        );
+        fbq("track", "PageView", {}, { eventID: pvEventId });
+      }
+
+      if (!isLocal && isTikTok && typeof ttq === "object" && ttq.load) {
+        ttq.load("DADULRRC77UDHLL3HTHG");
+        ttq.page({ event_id: pvEventId });
       }
 
       // ── 6. SESSION EVENT ID — stable per visit, used for dedup ─────
@@ -548,6 +617,9 @@
           cmp_id:       cmpId,
           placement:    placement,
           sc:           finalSc,
+          channel:      channel,
+          ttclid:       realTtclid,
+          ttp:          ttp,
         }),
       );
 
@@ -571,15 +643,19 @@
       put("s3", utmContent);    // creative NAME
 
       // CAPI reconciliation data (s4–s7)
-      put("s4", sessionEid);    // dedup id
-      put("s5", fbc);           // facebook click cookie
-      put("s6", fbp);           // facebook browser cookie
-      put("s7", landSec);       // land timestamp (unix sec)
+      // s5/s6 are channel-relative: Meta sends fbc/fbp, TikTok sends
+      // ttclid/_ttp. s11 says which channel, so the postback is never
+      // ambiguous about how to read them.
+      put("s4", sessionEid);                        // dedup id
+      put("s5", isTikTok ? realTtclid : fbc);       // click cookie  (ttclid | fbc)
+      put("s6", isTikTok ? ttp        : fbp);       // browser cookie (_ttp | _fbp)
+      put("s7", landSec);                           // land timestamp (unix sec)
 
       // Machine-readable IDs (s8–s10) — stable, won't break on rename
       put("s8",  adId);         // ad ID
       put("s9",  adsetId);      // adset ID
       put("s10", cmpId);        // campaign ID
+      put("s11", channel);      // traffic source: "fb" | "tiktok" | (empty)
 
       var finalCTA = "https://paychat.fuse-ad.com/tl?" + qs.toString();
 
@@ -592,13 +668,22 @@
           // we need the pixel beacon to flush first.
           e.preventDefault();
 
-          // Browser pixel Lead — eventID dedups against the CAPI upload
-          if (!isLocal && typeof fbq === "function") {
+          // Browser pixel Lead on the arriving channel only.
+          // eventID / event_id dedups against a later CAPI upload.
+          if (!isLocal && isMeta && typeof fbq === "function") {
             fbq(
               "track",
               "Lead",
               { value: 0.0, currency: "USD", predicted_ltv: 0.0 },
               { eventID: sessionEid },
+            );
+          }
+
+          if (!isLocal && isTikTok && typeof ttq === "object" && ttq.track) {
+            ttq.track(
+              "SubmitForm",
+              { value: 0.0, currency: "USD" },
+              { event_id: sessionEid },
             );
           }
 
@@ -611,7 +696,8 @@
     })();
   </script>
 
-  <!-- noscript pixel fallback — real domain only -->
+  <!-- noscript pixel fallback — real domain only.
+       Meta only: TikTok has no documented noscript endpoint. -->
   <noscript>
     <img
       height="1"
